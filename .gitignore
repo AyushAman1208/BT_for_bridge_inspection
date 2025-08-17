@@ -1,0 +1,7 @@
+rosbags/*
+.vscode/*
+log*
+*/__pycache__/*
+__pycache__/*
+__pycache__
+.env

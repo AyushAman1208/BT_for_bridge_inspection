@@ -1,0 +1,30 @@
+arm_drone:
+arms a drone given the drone id.
+
+go_off_board: 
+off board a drone given the drone id.
+
+go_to:
+goes to the location given x,y,z axes and the yaw mode and yaw angle.
+
+find_attachment_point:
+finds an attachment point on the bridge given the drone id.
+
+clean_surface:
+cleans the surface of the attachment point using the drone whose drone id is given.
+
+spray_adhesive:
+sprays the adhesive at the attachment point using the drone whose id is given.
+
+expose_manipulator:
+exposes the manipulator which holds a sensor. this is done on the drone whose drone id is given.
+
+align_manipulator:
+align the manipulator along the attachment point. this is again done on the drone whose drone id is given.
+
+apply_constant_pressure:
+the drone whose id is given applies a constant pressure over the sensor so that it attaches to the attachment point.
+
+send_sensor_attachment_location:
+sends the location of the sensor attachment point detected.
+

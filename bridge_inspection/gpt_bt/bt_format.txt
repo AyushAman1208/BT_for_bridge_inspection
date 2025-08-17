@@ -1,0 +1,9 @@
+Node(selector, sequence, decorator)
+  -child1
+  -child2
+  -child3
+  .
+  .
+  .
+  .
+  -child n

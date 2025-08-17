@@ -1,0 +1,12 @@
+Phase 1: Take-off and Target Acquisition
+    • UAV-1 and UAV-2 take off under GCS control.
+    • UAV-2 identifies the target attachment point using onboard vision and position data.
+    • UAV-1 positions near the target zone and awaits spraying command.
+Phase 2: Adhesive Spraying (UAV-1)
+    • UAV-1 approaches the surface, cleans, and sprays the adhesive component at the marked location.
+    • Coordinates are relayed to UAV-2 for alignment.
+Phase 3: Sensor Deployment (UAV-2)
+    • UAV-2 navigates to the marked location.
+    • The trajectory algorithm ensures that the manipulator end-effector remains parallel to the wall.
+    • UAV-2 approaches the surface and begins the contact procedure.
+    • Adaptive impedance control is engaged to maintain steady pressure during bonding.

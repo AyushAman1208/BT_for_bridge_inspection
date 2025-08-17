@@ -1,0 +1,27 @@
+digraph pastafarianism {
+ordering=out;
+graph [fontname="times-roman"];
+node [fontname="times-roman"];
+edge [fontname="times-roman"];
+"Phase 1" [fillcolor=orange, fontcolor=black, fontsize=9, label="Phase 1", shape=box, style=filled];
+"Clean Surface" [fillcolor=orange, fontcolor=black, fontsize=9, label="Clean Surface", shape=box, style=filled];
+"Phase 1" -> "Clean Surface";
+"Clean Surface*" [fillcolor=gray, fontcolor=black, fontsize=9, label="Clean Surface*", shape=ellipse, style=filled];
+"Clean Surface" -> "Clean Surface*";
+"Spray Adhesive" [fillcolor=gray, fontcolor=black, fontsize=9, label="Spray Adhesive", shape=ellipse, style=filled];
+"Clean Surface" -> "Spray Adhesive";
+"Send Sensor Attachment Location" [fillcolor=gray, fontcolor=black, fontsize=9, label="Send Sensor Attachment Location", shape=ellipse, style=filled];
+"Clean Surface" -> "Send Sensor Attachment Location";
+"Attach Sensor" [fillcolor=orange, fontcolor=black, fontsize=9, label="Attach Sensor", shape=box, style=filled];
+"Phase 1" -> "Attach Sensor";
+GoTo [fillcolor=gray, fontcolor=black, fontsize=9, label=GoTo, shape=ellipse, style=filled];
+"Attach Sensor" -> GoTo;
+"Expose Manipulator" [fillcolor=gray, fontcolor=black, fontsize=9, label="Expose Manipulator", shape=ellipse, style=filled];
+"Attach Sensor" -> "Expose Manipulator";
+"Align Manipulator" [fillcolor=gray, fontcolor=black, fontsize=9, label="Align Manipulator", shape=ellipse, style=filled];
+"Attach Sensor" -> "Align Manipulator";
+"Apply Constant Pressure" [fillcolor=gray, fontcolor=black, fontsize=9, label="Apply Constant Pressure", shape=ellipse, style=filled];
+"Attach Sensor" -> "Apply Constant Pressure";
+"Attach Sensor*" [fillcolor=gray, fontcolor=black, fontsize=9, label="Attach Sensor*", shape=ellipse, style=filled];
+"Attach Sensor" -> "Attach Sensor*";
+}

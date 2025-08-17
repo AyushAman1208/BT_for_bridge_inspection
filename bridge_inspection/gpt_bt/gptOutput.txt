@@ -1,0 +1,20 @@
+sequence
+  -sequence
+    -takeOff1
+    -go_off_board
+    -go_to
+    -await_spraying_command
+  -sequence
+    -takeOff2
+    -go_off_board
+    -find_attachment_point
+    -send_sensor_attachment_location
+  -sequence
+    -go_to
+    -clean_surface
+    -spray_adhesive
+  -sequence
+    -go_to
+    -expose_manipulator
+    -align_manipulator
+    -apply_constant_pressure

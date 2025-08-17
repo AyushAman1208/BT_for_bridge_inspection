@@ -1,0 +1,25 @@
+drone_start_pose:
+  x: 0.0
+  y: 0.0
+  z: 0.0
+name: scenario_bridge
+stage_size: [10.0, 10.0, 5.0]
+stage_bridge:
+  stage_center: [-4.0, -6.0, 0.0]
+  room_height: 5.0
+  bridge:
+    length: 10
+    width: 5
+    height: 7
+    thickness: 2
+    pillar_width: 2
+    deck_material:
+      ambient: [0.0, 0.0, 1.0, 1.0]   # blue RGBA
+      diffuse: [0.0, 0.0, 1.0, 1.0]
+      specular: [0.1, 0.1, 0.1, 1.0]
+    pillar_material:
+      ambient: [0.59, 0.29, 0.0, 1.0]  # brown RGBA
+      diffuse: [0.59, 0.29, 0.0, 1.0]
+      specular: [0.1, 0.1, 0.1, 1.0]
+
+    
