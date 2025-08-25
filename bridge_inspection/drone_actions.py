@@ -7,6 +7,9 @@ from as2_python_api.behavior_actions.behavior_handler import BehaviorHandler
 from time import sleep
 from rclpy.node import Node
 from action_msgs.msg import GoalStatus
+import random
+
+from std_msgs.msg import ColorRGBA
 
 from geometry_msgs.msg import PoseStamped
 from as2_python_api.behavior_actions.behavior_handler import BehaviorHandler #,GoalRejected, GoalFailed
@@ -25,7 +28,7 @@ class Dancer(DroneInterface):
 
         self.current_behavior: Optional[BehaviorHandler] = None
         self.current_altitude = 0.0   # store latest altitude
-
+        self.led_pub = self.create_publisher(ColorRGBA, f"/{namespace}/leds/control", 10)
         # Subscribe to pose updates
         self.create_subscription(
             PoseStamped,
@@ -160,31 +163,73 @@ class SwarmConductor(Node):
 
     def find_attachment_point(self,droneId):
         print(f"Drone {droneId} finding attachment point")
+        colour = [random.randint(0, 255) for _ in range(3)]
+        drone = self.drones[droneId-1]
+        msg = ColorRGBA()
+        msg.r = colour[0]/255.0
+        msg.g = colour[1]/255.0
+        msg.b = colour[2]/255.0
+        drone.led_pub.publish(msg)
         sleep(1)
         return True
     
     def clean_surface(self,droneId):
         print(f"Drone {droneId} cleaning surface")
+        colour = [random.randint(0, 255) for _ in range(3)]
+        drone = self.drones[droneId-1]
+        msg = ColorRGBA()
+        msg.r = colour[0]/255.0
+        msg.g = colour[1]/255.0
+        msg.b = colour[2]/255.0
+        drone.led_pub.publish(msg)
         sleep(1)
         return True
     
     def spray_adhesive(self,droneId):
         print(f"Drone {droneId} spraying adhesive")
+        colour = [random.randint(0, 255) for _ in range(3)]
+        drone = self.drones[droneId-1]
+        msg = ColorRGBA()
+        msg.r = colour[0]/255.0
+        msg.g = colour[1]/255.0
+        msg.b = colour[2]/255.0
+        drone.led_pub.publish(msg)
         sleep(1)
         return True
     
     def expose_manipulator(self,droneId):
         print(f"Drone {droneId} exposing manipulator")
+        colour = [random.randint(0, 255) for _ in range(3)]
+        drone = self.drones[droneId-1]
+        msg = ColorRGBA()
+        msg.r = colour[0]/255.0
+        msg.g = colour[1]/255.0
+        msg.b = colour[2]/255.0
+        drone.led_pub.publish(msg)
         sleep(1)
         return True
     
     def align_manipulator(self,droneId):
         print(f"Drone {droneId} aligning manipulator")
+        colour = [random.randint(0, 255) for _ in range(3)]
+        drone = self.drones[droneId-1]
+        msg = ColorRGBA()
+        msg.r = colour[0]/255.0
+        msg.g = colour[1]/255.0
+        msg.b = colour[2]/255.0
+        drone.led_pub.publish(msg)
         sleep(1)
         return True
     
     def apply_constant_pressure(self,droneId):
         print(f"Drone {droneId} applying constant pressure")
+        colour = [random.randint(0, 255) for _ in range(3)]
+        drone = self.drones[droneId-1]
+        msg = ColorRGBA()
+        msg.r = colour[0]/255.0
+        msg.g = colour[1]/255.0
+        msg.b = colour[2]/255.0
+        drone.led_pub.publish(msg)
         sleep(1)
         return True
     
