@@ -83,6 +83,7 @@ class SwarmConductor(Node):
 
     def __init__(self, drones_ns: List[str], verbose: bool = False,
                  use_sim_time: bool = False):
+        super().__init__('swarm_conductor')
         self.drones: dict[int, Dancer] = {}
         for index, name in enumerate(drones_ns):
             path = []
@@ -96,6 +97,16 @@ class SwarmConductor(Node):
         arm_drone_status = drone.arm()
         print('arm_drone_status',arm_drone_status)
         print('current_behavior',drone.current_behavior)
+
+        print('Drone info')
+        print('connected: ',drone.info['connected'])
+        print('armed: ',drone.info['armed'])
+        print('offboard: ',drone.info['offboard'])
+        print('state: ',drone.info['state'])
+        print('yaw_mode: ',drone.info['yaw_mode'])
+        print('control_mode: ',drone.info['control_mode'])
+        print('reference_frame: ',drone.info['reference_frame'])
+        print('all info: ',drone.info)
 
         return arm_drone_status
 
@@ -118,6 +129,7 @@ class SwarmConductor(Node):
 
         print('***********************************************************************')
         print(f"Drone {droneId} going to {x}, {y}, {z}")
+        # self.is_at_target(droneId, x, y, z, 0.2)
 
         # 1st call: start once, then report RUNNING (by returning None)
         # print(drone.current_behavior.is_running())
@@ -238,8 +250,6 @@ class SwarmConductor(Node):
         sleep(1)
         return True
     
-    ##########################################################
-
     def shutdown(self,droneId):
         """Shutdown all drones in swarm"""
         drone = self.drones[droneId-1]
@@ -295,19 +305,34 @@ class SwarmConductor(Node):
     # Add these verification methods
     def is_armed(self, droneId):
         """Check if drone is armed (mock implementation)"""
-        # In real implementation, check actual armed status
-        return True
+        drone = self.drones[droneId-1]
+        return drone.info["armed"]
 
     def is_in_offboard_mode(self, droneId):
         """Check if drone is in offboard mode (mock implementation)"""
         # In real implementation, check actual mode
-        return True
+        drone = self.drones[droneId-1]
+        return drone.info["offboard"]
 
     def get_altitude(self, droneId):
         drone = self.drones[droneId-1]
-        return drone.current_altitude
+        return drone.position[2]
     
     def is_at_altitude(self, droneId, target_alt, tolerance=0.2):
         current_alt = self.get_altitude(droneId)
         print(f"[DEBUG] Drone {droneId} current_alt: {current_alt:.2f}, target_alt: {target_alt}")
         return abs(current_alt - target_alt) <= tolerance
+    def is_at_target(self, droneId, target_x, target_y, target_z, tolerance=0.2):
+        print('Drone position',self.get_drone_position(droneId))
+        current_x = self.get_position(droneId)[0]
+        current_y = self.get_position(droneId)[1]
+        current_z = self.get_position(droneId)[2]
+        print(f"[DEBUG] Drone {droneId} current_x: {current_x:.2f}, target_x: {target_x:.2f}")
+        print(f"[DEBUG] Drone {droneId} current_y: {current_y:.2f}, target_y: {target_y:.2f}")
+        print(f"[DEBUG] Drone {droneId} current_z: {current_z:.2f}, target_z: {target_z:.2f}")
+        return abs(current_x - target_x) <= tolerance and abs(current_y - target_y) <= tolerance and abs(current_z - target_z) <= tolerance
+    def get_drone_position(self, droneId):
+        drone = self.drones[droneId-1]
+        position = drone.position
+        print(f"Drone {droneId} position: {position}")
+        return position
