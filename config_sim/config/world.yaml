@@ -18,11 +18,11 @@ drones:
       - 1.0
       - 0.0
       - 0.2
-  - model_type: "crazyflie_led_ring"
-    model_name: "drone2"
-    flight_time: 60
-    xyz:
-      - 0.0
-      - 0.0
-      - 0.2
+  # - model_type: "crazyflie_led_ring"
+  #   model_name: "drone2"
+  #   flight_time: 60
+  #   xyz:
+  #     - 0.0
+  #     - 0.0
+  #     - 0.2
 

@@ -10,6 +10,8 @@ import sys
 
 from itertools import cycle, islice
 import rclpy
+from as2_msgs.msg import YawMode
+import py_trees.display as display
 
 py_trees.logging.level = py_trees.logging.Level.DEBUG
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
@@ -29,7 +31,7 @@ class BatteryMonitor(py_trees.behaviour.Behaviour):
         return py_trees.common.Status.SUCCESS
     
 class ActionBehaviour(py_trees.behaviour.Behaviour):
-    def __init__(self, name, action_fn=None, max_retries=3, timeout=5.0):
+    def __init__(self, name, action_fn=None, max_retries=25, timeout=50.0):
         super().__init__(name)
         self.action_fn = action_fn
         self.max_retries = max_retries
@@ -79,35 +81,35 @@ class ActionBehaviour(py_trees.behaviour.Behaviour):
             self.action_started = False
             return py_trees.common.Status.RUNNING
         
-class WaitForAltitude(py_trees.behaviour.Behaviour):
-    """Wait until the drone reports it is at (or above) a target altitude.
-    This prevents goto/approach behaviours from running before the vehicle is airborne.
-    """
-    def __init__(self, droneInterface, droneId, altitude=1.5, timeout=30.0):
-        super().__init__(f"WaitForAltitude_{droneId}")
-        self.droneInterface = droneInterface
-        self.droneId = droneId
-        self.altitude = altitude
-        self.timeout = timeout
-        self.start_time = None
+# class WaitForAltitude(py_trees.behaviour.Behaviour):
+#     """Wait until the drone reports it is at (or above) a target altitude.
+#     This prevents goto/approach behaviours from running before the vehicle is airborne.
+#     """
+#     def __init__(self, droneInterface, droneId, altitude=1.5, timeout=120.0):
+#         super().__init__(f"WaitForAltitude_{droneId}")
+#         self.droneInterface = droneInterface
+#         self.droneId = droneId
+#         self.altitude = altitude
+#         self.timeout = timeout
+#         self.start_time = None
 
-    def initialise(self):
-        self.start_time = time.time()
-        logging.info(f"Waiting for drone {self.droneId} to reach altitude >= {self.altitude}m")
+#     def initialise(self):
+#         self.start_time = time.time()
+#         logging.info(f"Waiting for drone {self.droneId} to reach altitude >= {self.altitude}m")
 
-    def update(self):
-        try:
-            if self.droneInterface.is_at_altitude(self.droneId, self.altitude):
-                logging.info(f"Drone {self.droneId} reached altitude {self.altitude}m")
-                return py_trees.common.Status.SUCCESS
-            if time.time() - self.start_time > self.timeout:
-                logging.error(f"Timeout waiting for drone {self.droneId} to reach altitude")
-                return py_trees.common.Status.FAILURE
-            # not there yet — keep running; the tick loop will call update again
-            return py_trees.common.Status.RUNNING
-        except Exception as e:
-            logging.error(f"Error checking altitude for drone {self.droneId}: {e}")
-            return py_trees.common.Status.FAILURE
+#     def update(self):
+#         try:
+#             if self.droneInterface.is_at_altitude(self.droneId, self.altitude):
+#                 logging.info(f"Drone {self.droneId} reached altitude {self.altitude}m")
+#                 return py_trees.common.Status.SUCCESS
+#             if time.time() - self.start_time > self.timeout:
+#                 logging.error(f"Timeout waiting for drone {self.droneId} to reach altitude")
+#                 return py_trees.common.Status.FAILURE
+#             # not there yet — keep running; the tick loop will call update again
+#             return py_trees.common.Status.RUNNING
+#         except Exception as e:
+#             logging.error(f"Error checking altitude for drone {self.droneId}: {e}")
+#             return py_trees.common.Status.FAILURE
 
 class BridgeInspectionPhase1:
     def __init__(self,droneInterface):
@@ -136,37 +138,37 @@ class BridgeInspectionPhase1:
         self._verify_drone_methods(['arm_drone', 'go_off_board', 'takeoff', 'is_at_altitude'])
 
         root = py_trees.composites.Sequence(name=f"TakeOff_{droneId}", memory=True)
-        
         arm = ActionBehaviour(
             f"Arm_{droneId}", 
             lambda: self.droneInterface.arm_drone(droneId),
             max_retries=3,
-            timeout=5.0
+            timeout=120.0
         )
         
         offboard = ActionBehaviour(
             f"Offboard_{droneId}", 
             lambda: self.droneInterface.go_off_board(droneId),
             max_retries=3,
-            timeout=5.0
+            timeout=120.0
         )
         
         takeoff = ActionBehaviour(
             f"TakeOffCmd_{droneId}", 
             lambda: self.droneInterface.takeoff(droneId),
             max_retries=3,
-            timeout=10.0
+            timeout=120.0
         )
         
-        # Add altitude verification
-        altitude_check = WaitForAltitude(
-            self.droneInterface,
-            droneId,
-            altitude=2.0,
-            timeout=30.0
-        )
+        # # Add altitude verification
+        # altitude_check = WaitForAltitude(
+        #     self.droneInterface,
+        #     droneId,
+        #     altitude=2.0,
+        #     timeout=120.0
+        # )
         
-        root.add_children([arm, offboard, takeoff, altitude_check])
+        # root.add_children([arm, offboard, takeoff, altitude_check])
+        root.add_children([arm, offboard, takeoff])
         return root
 
     def acquireTarget(self, droneId):
@@ -176,13 +178,15 @@ class BridgeInspectionPhase1:
         root = py_trees.composites.Sequence(name=f"AcquireTarget_{droneId}", memory=True)
         
         # Ensure drone is airborne before attempting GoTo
-        wait_air = WaitForAltitude(self.droneInterface, droneId, altitude=1.5, timeout=20.0)
+        # wait_air = WaitForAltitude(self.droneInterface, droneId, altitude=1.5, timeout=20.0)
 
         go_to = ActionBehaviour(
             "GoTo", 
-            lambda: self.droneInterface.go_to(droneId, 1, -3.25, 8, 0.5, 0, 0, "earth"),
+            # in BridgeInspectionPhase1.acquireTarget / approachTarget
+            lambda: self.droneInterface.go_to(droneId, 1, -3.25, 8, 0.5, YawMode.PATH_FACING, None, "earth")
+,
             max_retries=5,
-            timeout=20.0
+            timeout=50.0
         )
         
         find_attachment = ActionBehaviour(
@@ -192,13 +196,13 @@ class BridgeInspectionPhase1:
             timeout=20.0
         )
         
-        root.add_children([wait_air, go_to, find_attachment])
+        root.add_children([ go_to, find_attachment])
         return root
     
     def createRecoveryTree(self, droneId):
         recovery = py_trees.composites.Sequence(name=f"Recovery_{droneId}", memory=True)
-        land = ActionBehaviour("Land", lambda: self.droneInterface.land(droneId), timeout=15.0)
-        disarm = ActionBehaviour("Disarm", lambda: self.droneInterface.disarm_drone(droneId), timeout=5.0)
+        land = ActionBehaviour("Land", lambda: self.droneInterface.land(droneId), timeout=150.0)
+        disarm = ActionBehaviour("Disarm", lambda: self.droneInterface.disarm_drone(droneId), timeout=150.0)
         recovery.add_children([land, disarm])
         return recovery
 
@@ -207,11 +211,11 @@ class BridgeInspectionPhase1:
         self._verify_drone_methods(['go_to', 'find_attachment_point', 'is_at_altitude'])
 
         root = py_trees.composites.Sequence(name=f"ApproachTarget_{droneId}", memory=True)
-        wait_air = WaitForAltitude(self.droneInterface, droneId, altitude=1.5, timeout=20.0)
-        goTo = ActionBehaviour("GoTo", lambda:self.droneInterface.go_to(droneId, 1, -3.5, 8, 0.5, 0, 0, "earth"), max_retries=5, timeout=20.0)
-        findAttachmentPoint = ActionBehaviour("FindAttachmentPoint", lambda:self.droneInterface.find_attachment_point(droneId), max_retries=5, timeout=20.0)
+        # wait_air = WaitForAltitude(self.droneInterface, droneId, altitude=1.5, timeout=120.0)
+        goTo = ActionBehaviour("GoTo", lambda:self.droneInterface.go_to(droneId, 1, -3.2, 8, 0.5, 0, 0, "earth"), max_retries=5, timeout=120.0)
+        findAttachmentPoint = ActionBehaviour("FindAttachmentPoint", lambda:self.droneInterface.find_attachment_point(droneId), max_retries=5, timeout=210.0)
 
-        root.add_children([wait_air, goTo, findAttachmentPoint])
+        root.add_children([ goTo, findAttachmentPoint])
         return root
 
     def cleanSurface(self,droneId):
@@ -241,6 +245,7 @@ class BridgeInspectionPhase1:
         root = py_trees.composites.Parallel(
             name="Phase1",
             policy=py_trees.common.ParallelPolicy.SuccessOnAll()
+            # memory=False
         )
 
         try:
@@ -326,7 +331,9 @@ def main():
     try:
         print("\n--- Starting Behavior Tree ---\n")
         tree = py_trees.trees.BehaviourTree(root=phase1.createPhase1BehaviorTree())
-        tree.setup(timeout=15)
+        tree.setup(timeout=150)
+        dot_graph = py_trees.display.render_dot_tree(tree.root)
+        print(dot_graph)
         
         # Create a separate ROS node for spinning
         spinner_node = rclpy.create_node('behavior_tree_spinner')
