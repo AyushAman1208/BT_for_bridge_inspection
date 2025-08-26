@@ -120,6 +120,8 @@ class SwarmConductor(Node):
         return offboard_drone_status
     def go_to(self, droneId, x, y, z, speed, yaw_mode, yaw_angle, frame_id):
         drone = self.drones[droneId-1]
+        if not self.is_in_offboard_mode(droneId):
+            return None
 
         # Normalize yaw parameters: prefer enums, angle None when not FIXED
         # yaw_mode = yaw_mode if isinstance(yaw_mode, int) else YawMode.PATH_FACING
@@ -175,6 +177,8 @@ class SwarmConductor(Node):
 
     def find_attachment_point(self,droneId):
         print(f"Drone {droneId} finding attachment point")
+        if not self.is_at_target(droneId, 1, -3.25, 8, 0.2):
+            return None
         colour = [random.randint(0, 255) for _ in range(3)]
         drone = self.drones[droneId-1]
         msg = ColorRGBA()
@@ -186,6 +190,8 @@ class SwarmConductor(Node):
         return True
     
     def clean_surface(self,droneId):
+        if not self.is_at_target(droneId, 1, -3.25, 8, 0.2):
+            return None
         print(f"Drone {droneId} cleaning surface")
         colour = [random.randint(0, 255) for _ in range(3)]
         drone = self.drones[droneId-1]
@@ -198,6 +204,8 @@ class SwarmConductor(Node):
         return True
     
     def spray_adhesive(self,droneId):
+        if not self.is_at_target(droneId, 1, -3.25, 8, 0.2):
+            return None
         print(f"Drone {droneId} spraying adhesive")
         colour = [random.randint(0, 255) for _ in range(3)]
         drone = self.drones[droneId-1]
@@ -210,6 +218,8 @@ class SwarmConductor(Node):
         return True
     
     def expose_manipulator(self,droneId):
+        if not self.is_at_target(droneId, 1, -3.25, 8, 0.2):
+            return None
         print(f"Drone {droneId} exposing manipulator")
         colour = [random.randint(0, 255) for _ in range(3)]
         drone = self.drones[droneId-1]
@@ -222,6 +232,8 @@ class SwarmConductor(Node):
         return True
     
     def align_manipulator(self,droneId):
+        if not self.is_at_target(droneId, 1, -3.25, 8, 0.2):
+            return None
         print(f"Drone {droneId} aligning manipulator")
         colour = [random.randint(0, 255) for _ in range(3)]
         drone = self.drones[droneId-1]
@@ -234,6 +246,8 @@ class SwarmConductor(Node):
         return True
     
     def apply_constant_pressure(self,droneId):
+        if not self.is_at_target(droneId, 1, -3.25, 8, 0.2):
+            return None
         print(f"Drone {droneId} applying constant pressure")
         colour = [random.randint(0, 255) for _ in range(3)]
         drone = self.drones[droneId-1]
@@ -266,6 +280,8 @@ class SwarmConductor(Node):
     def takeoff(self, droneId):
         drone = self.drones[droneId-1]
         print('current_behavior 1',drone.current_behavior)
+        if not self.is_armed(droneId):
+            return None
         
         if drone.current_behavior is None or not drone.current_behavior.is_running():
             try:
@@ -302,7 +318,6 @@ class SwarmConductor(Node):
             return False
 
 
-    # Add these verification methods
     def is_armed(self, droneId):
         """Check if drone is armed (mock implementation)"""
         drone = self.drones[droneId-1]
@@ -324,9 +339,9 @@ class SwarmConductor(Node):
         return abs(current_alt - target_alt) <= tolerance
     def is_at_target(self, droneId, target_x, target_y, target_z, tolerance=0.2):
         print('Drone position',self.get_drone_position(droneId))
-        current_x = self.get_position(droneId)[0]
-        current_y = self.get_position(droneId)[1]
-        current_z = self.get_position(droneId)[2]
+        current_x = self.get_drone_position(droneId)[0]
+        current_y = self.get_drone_position(droneId)[1]
+        current_z = self.get_drone_position(droneId)[2]
         print(f"[DEBUG] Drone {droneId} current_x: {current_x:.2f}, target_x: {target_x:.2f}")
         print(f"[DEBUG] Drone {droneId} current_y: {current_y:.2f}, target_y: {target_y:.2f}")
         print(f"[DEBUG] Drone {droneId} current_z: {current_z:.2f}, target_z: {target_z:.2f}")
