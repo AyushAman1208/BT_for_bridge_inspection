@@ -205,6 +205,16 @@ class BridgeInspectionPhase1:
         disarm = ActionBehaviour("Disarm", lambda: self.droneInterface.disarm_drone(droneId), timeout=150.0)
         recovery.add_children([land, disarm])
         return recovery
+    
+    def land(self, droneId):
+        # verify required methods
+        self._verify_drone_methods(['land', 'disarm_drone'])
+
+        root = py_trees.composites.Sequence(name=f"Land_{droneId}", memory=True)
+        land = ActionBehaviour("Land", lambda: self.droneInterface.land(droneId))
+        disarm = ActionBehaviour("Disarm", lambda: self.droneInterface.disarm_drone(droneId))
+        root.add_children([land, disarm])
+        return root
 
     def approachTarget(self,droneId):
         # verify required methods
@@ -255,13 +265,15 @@ class BridgeInspectionPhase1:
             drone1_tree = self._create_drone_sequence(droneId1, [
                 ('takeOff', self.takeOff),
                 ('acquireTarget', self.acquireTarget),
-                ('cleanSurface', self.cleanSurface)
+                ('cleanSurface', self.cleanSurface),
+                ('land', self.land)
             ])
             
             drone2_tree = self._create_drone_sequence(droneId2, [
                 ('takeOff', self.takeOff),
                 ('approachTarget', self.approachTarget),
-                ('attachSensor', self.attachSensor)
+                ('attachSensor', self.attachSensor),
+                ('land', self.land)
             ])
             
             root.add_children([drone1_tree, drone2_tree])

@@ -270,7 +270,13 @@ class SwarmConductor(Node):
         return drone.shutdown()
     
     
+    def disarm_drone(self,droneId):
+        """Disarm all drones in swarm"""
+        if self.get_altitude(droneId) > 0.1:
+            return
 
+        drone = self.drones[droneId-1]
+        return drone.disarm()
     def get_ready(self,droneId) -> bool:
         """Arm and offboard for all drones in swarm"""
         success = True
@@ -313,7 +319,7 @@ class SwarmConductor(Node):
 
         try:
             handler = drone.do_behavior("land", 0.4, False)
-            return None
+            return handler
         except BehaviorHandler.GoalRejected:
             return False
 
