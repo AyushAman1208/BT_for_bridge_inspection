@@ -12,6 +12,7 @@ from itertools import cycle, islice
 import rclpy
 from as2_msgs.msg import YawMode
 import py_trees.display as display
+from py_trees import blackboard
 
 py_trees.logging.level = py_trees.logging.Level.DEBUG
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
@@ -22,7 +23,6 @@ class BatteryMonitor(py_trees.behaviour.Behaviour):
         self.droneInterface = droneInterface
         self.droneId = droneId
         self.threshold = threshold
-        
     def update(self):
         battery_level = self.droneInterface.get_battery_level(self.droneId)
         if battery_level < self.threshold:
@@ -81,41 +81,34 @@ class ActionBehaviour(py_trees.behaviour.Behaviour):
             self.action_started = False
             return py_trees.common.Status.RUNNING
         
-# class WaitForAltitude(py_trees.behaviour.Behaviour):
-#     """Wait until the drone reports it is at (or above) a target altitude.
-#     This prevents goto/approach behaviours from running before the vehicle is airborne.
-#     """
-#     def __init__(self, droneInterface, droneId, altitude=1.5, timeout=120.0):
-#         super().__init__(f"WaitForAltitude_{droneId}")
-#         self.droneInterface = droneInterface
-#         self.droneId = droneId
-#         self.altitude = altitude
-#         self.timeout = timeout
-#         self.start_time = None
-
-#     def initialise(self):
-#         self.start_time = time.time()
-#         logging.info(f"Waiting for drone {self.droneId} to reach altitude >= {self.altitude}m")
-
-#     def update(self):
-#         try:
-#             if self.droneInterface.is_at_altitude(self.droneId, self.altitude):
-#                 logging.info(f"Drone {self.droneId} reached altitude {self.altitude}m")
-#                 return py_trees.common.Status.SUCCESS
-#             if time.time() - self.start_time > self.timeout:
-#                 logging.error(f"Timeout waiting for drone {self.droneId} to reach altitude")
-#                 return py_trees.common.Status.FAILURE
-#             # not there yet — keep running; the tick loop will call update again
-#             return py_trees.common.Status.RUNNING
-#         except Exception as e:
-#             logging.error(f"Error checking altitude for drone {self.droneId}: {e}")
-#             return py_trees.common.Status.FAILURE
 
 class BridgeInspectionPhase1:
     def __init__(self,droneInterface):
         self.drones = []
         self.droneInterface = droneInterface
         self.tree = None
+        self.waypoints = [
+            {
+                'x': 1,
+                'y': -3.25,
+                'z': 8
+            },
+            {
+                'x': 1,
+                'y': -3.25,
+                'z': 8
+            },
+            {
+                'x': 1,
+                'y': -3.25,
+                'z': 8
+            }
+        ]
+        self.drone1_waypoint = self.waypoints[0]
+        self.drone2_waypoint = self.waypoints[1]
+        self.drone1_waypoint_index = 0
+        
+
 
     # === Function that every behaviour will call ===
     def do_action(self,droneId):
@@ -131,26 +124,39 @@ class BridgeInspectionPhase1:
                 raise AttributeError(
                     f"Drone interface is missing required method: {method_name}"
                 )
+            
+    def armDrone(self,droneId):
 
-    def takeOff(self, droneId):
-        """Improved takeoff sequence with verification"""
-        # verify required methods for takeoff
-        self._verify_drone_methods(['arm_drone', 'go_off_board', 'takeoff', 'is_at_altitude'])
-
-        root = py_trees.composites.Sequence(name=f"TakeOff_{droneId}", memory=True)
+        root = py_trees.composites.Sequence(name=f"ArmDrone_{droneId}", memory=True)
         arm = ActionBehaviour(
             f"Arm_{droneId}", 
             lambda: self.droneInterface.arm_drone(droneId),
             max_retries=3,
             timeout=120.0
         )
-        
+        root.add_children([arm])
+        return root
+    
+    def offboard(self,droneId):
+
+        root = py_trees.composites.Sequence(name=f"Go_offboard_{droneId}", memory=True)
         offboard = ActionBehaviour(
             f"Offboard_{droneId}", 
             lambda: self.droneInterface.go_off_board(droneId),
             max_retries=3,
             timeout=120.0
         )
+        root.add_children([offboard])
+        return root
+    def takeOff(self, droneId):
+        """Improved takeoff sequence with verification"""
+        # verify required methods for takeoff
+        self._verify_drone_methods(['arm_drone', 'go_off_board', 'takeoff', 'is_at_altitude'])
+
+        root = py_trees.composites.Sequence(name=f"TakeOff_{droneId}", memory=True)
+        
+        
+        
         
         takeoff = ActionBehaviour(
             f"TakeOffCmd_{droneId}", 
@@ -158,17 +164,7 @@ class BridgeInspectionPhase1:
             max_retries=3,
             timeout=120.0
         )
-        
-        # # Add altitude verification
-        # altitude_check = WaitForAltitude(
-        #     self.droneInterface,
-        #     droneId,
-        #     altitude=2.0,
-        #     timeout=120.0
-        # )
-        
-        # root.add_children([arm, offboard, takeoff, altitude_check])
-        root.add_children([arm, offboard, takeoff])
+        root.add_children([ takeoff])
         return root
 
     def acquireTarget(self, droneId):
@@ -177,26 +173,31 @@ class BridgeInspectionPhase1:
 
         root = py_trees.composites.Sequence(name=f"AcquireTarget_{droneId}", memory=True)
         
-        # Ensure drone is airborne before attempting GoTo
-        # wait_air = WaitForAltitude(self.droneInterface, droneId, altitude=1.5, timeout=20.0)
 
         go_to = ActionBehaviour(
             "GoTo", 
             # in BridgeInspectionPhase1.acquireTarget / approachTarget
-            lambda: self.droneInterface.go_to(droneId, 1, -3.25, 8, 0.5, YawMode.PATH_FACING, None, "earth")
+            lambda: self.droneInterface.go_to(droneId, self.drone1_waypoint['x'], self.drone1_waypoint['y'], self.drone1_waypoint['z'], 0.5, YawMode.PATH_FACING, None, "earth")
 ,
             max_retries=5,
             timeout=50.0
         )
         
+        
+        
+        root.add_children([ go_to])
+        return root
+    def findAttachmentPoint(self,droneId):
+
+
+        root = py_trees.composites.Sequence(name=f"FindAttachmentPoint_{droneId}", memory=True)
         find_attachment = ActionBehaviour(
             "FindAttachmentPoint", 
-            lambda: self.droneInterface.find_attachment_point(droneId),
+            lambda: self.droneInterface.find_attachment_point(droneId,self.drone1_waypoint['x'], self.drone1_waypoint['y'], self.drone1_waypoint['z']),
             max_retries=5,
             timeout=20.0
         )
-        
-        root.add_children([ go_to, find_attachment])
+        root.add_children([find_attachment])
         return root
     
     def createRecoveryTree(self, droneId):
@@ -206,14 +207,25 @@ class BridgeInspectionPhase1:
         recovery.add_children([land, disarm])
         return recovery
     
+    def updateTarget(self,droneId):
+        if(self.drone1_waypoint_index < len(self.waypoints)-1):
+            self.drone1_waypoint_index += 1
+            self.drone1_waypoint = self.waypoints[self.drone1_waypoint_index]
+            self.drone2_waypoint = self.waypoints[self.drone1_waypoint_index]
+            return None
+        else:
+            return True
+
     def land(self, droneId):
+        
         # verify required methods
         self._verify_drone_methods(['land', 'disarm_drone'])
 
         root = py_trees.composites.Sequence(name=f"Land_{droneId}", memory=True)
+        updateTarget = ActionBehaviour("UpdateTarget", lambda: self.updateTarget(droneId))
         land = ActionBehaviour("Land", lambda: self.droneInterface.land(droneId))
         disarm = ActionBehaviour("Disarm", lambda: self.droneInterface.disarm_drone(droneId))
-        root.add_children([land, disarm])
+        root.add_children([updateTarget, land, disarm])
         return root
 
     def approachTarget(self,droneId):
@@ -222,30 +234,60 @@ class BridgeInspectionPhase1:
 
         root = py_trees.composites.Sequence(name=f"ApproachTarget_{droneId}", memory=True)
         # wait_air = WaitForAltitude(self.droneInterface, droneId, altitude=1.5, timeout=120.0)
-        goTo = ActionBehaviour("GoTo", lambda:self.droneInterface.go_to(droneId, 1, -3.2, 8, 0.5, 0, 0, "earth"), max_retries=5, timeout=120.0)
-        findAttachmentPoint = ActionBehaviour("FindAttachmentPoint", lambda:self.droneInterface.find_attachment_point(droneId), max_retries=5, timeout=210.0)
+        goTo = ActionBehaviour("GoTo", lambda:self.droneInterface.go_to(droneId,self.drone2_waypoint['x'], self.drone2_waypoint['y'], self.drone2_waypoint['z'], 0.5, 0, 0, "earth"), max_retries=5, timeout=120.0)
+        
+        root.add_children([ goTo])
+        return root
+    def findAttachmentPoint(self,droneId):
+        root = py_trees.composites.Sequence(name=f"FindAttachmentPoint_{droneId}", memory=True)
+        findAttachmentPoint = ActionBehaviour("FindAttachmentPoint", lambda:self.droneInterface.find_attachment_point(droneId, self.drone2_waypoint['x'], self.drone2_waypoint['y'], self.drone2_waypoint['z']), max_retries=5, timeout=210.0)
 
-        root.add_children([ goTo, findAttachmentPoint])
+        root.add_children([findAttachmentPoint])
         return root
 
     def cleanSurface(self,droneId):
         root = py_trees.composites.Sequence(name=f"CleanSurface_{droneId}", memory=True)
-        cleanSurface = ActionBehaviour("Clean Surface", lambda:self.droneInterface.clean_surface(droneId))
-        sprayAdhesive = ActionBehaviour("Spray Adhesive", lambda:self.droneInterface.spray_adhesive(droneId))
-        sendSensorAttachmentLocation = ActionBehaviour("Send Sensor Attachment Location", lambda:self.droneInterface.send_sensor_attachment_location(droneId))
-
-        root.add_children([cleanSurface, sprayAdhesive, sendSensorAttachmentLocation])
+        cleanSurface = ActionBehaviour("Clean Surface", lambda:self.droneInterface.clean_surface(droneId,self.drone1_waypoint['x'],self.drone1_waypoint['y'],self.drone1_waypoint['z']))
+        
+        root.add_children([cleanSurface])
         return root
+    
+    def sprayAdhesive(self,droneId):
+        root = py_trees.composites.Sequence(name=f"SprayAdhesive_{droneId}", memory=True)
+        sprayAdhesive = ActionBehaviour("Spray Adhesive", lambda:self.droneInterface.spray_adhesive(droneId,self.drone1_waypoint['x'],self.drone1_waypoint['y'],self.drone1_waypoint['z']))
 
+        root.add_children([sprayAdhesive])
+        return root
+    def sendSensorAttachmentLocation(self,droneId):
+        root = py_trees.composites.Sequence(name=f"SendSensorAttachmentLocation_{droneId}", memory=True)
+        sendSensorAttachmentLocation = ActionBehaviour("Send Sensor Attachment Location", lambda:self.droneInterface.send_sensor_attachment_location(droneId,self.drone1_waypoint['x'],self.drone1_waypoint['y'],self.drone1_waypoint['z']))
+
+        root.add_children([sendSensorAttachmentLocation])
+        return root
+    def exposeManipulator(self,droneId):
+        root = py_trees.composites.Sequence(name=f"ExposeManipulator_{droneId}", memory=True)
+        exposeManipulator = ActionBehaviour("Expose Manipulator", lambda:self.droneInterface.expose_manipulator(droneId,self.drone2_waypoint['x'], self.drone2_waypoint['y'], self.drone2_waypoint['z']))
+        
+        root.add_children([exposeManipulator])
+        return root
+    def alignManipulator(self,droneId):
+        root = py_trees.composites.Sequence(name=f"AlignManipulator_{droneId}", memory=True)
+        alignManipulator = ActionBehaviour("Align Manipulator", lambda:self.droneInterface.align_manipulator(droneId,self.drone2_waypoint['x'], self.drone2_waypoint['y'], self.drone2_waypoint['z'] ))
+        
+        root.add_children([alignManipulator])
+        return root
+    
+    def applyConstantPressure(self,droneId):
+        root = py_trees.composites.Sequence(name=f"ApplyConstantPressure_{droneId}", memory=True)
+        applyConstantPressure = ActionBehaviour("Apply Constant Pressure", lambda:self.droneInterface.apply_constant_pressure(droneId,self.drone2_waypoint['x'], self.drone2_waypoint['y'], self.drone2_waypoint['z']))
+        
+        root.add_children([applyConstantPressure])
+        return root
     def attachSensor(self,droneId):
         root = py_trees.composites.Sequence(name=f"AttachSensor_{droneId}", memory=True)
-        goTo = ActionBehaviour("GoTo", lambda:self.do_action(droneId))
-        exposeManipulator = ActionBehaviour("Expose Manipulator", lambda:self.droneInterface.expose_manipulator(droneId))
-        alignManipulator = ActionBehaviour("Align Manipulator", lambda:self.droneInterface.align_manipulator(droneId))
-        applyConstantPressure = ActionBehaviour("Apply Constant Pressure", lambda:self.droneInterface.apply_constant_pressure(droneId))
         attachSensor = ActionBehaviour("Attach Sensor", lambda:self.do_action(droneId))
 
-        root.add_children([goTo, exposeManipulator, alignManipulator, applyConstantPressure, attachSensor])
+        root.add_children([attachSensor])
         return root
 
     def createPhase1BehaviorTree(self):
@@ -263,15 +305,26 @@ class BridgeInspectionPhase1:
             self._verify_drone_methods(['arm_drone', 'go_off_board', 'takeoff', 'is_at_altitude', 'go_to', 'find_attachment_point'])
 
             drone1_tree = self._create_drone_sequence(droneId1, [
+                ('armDrone', self.armDrone),
+                ('goOffboard', self.offboard),
                 ('takeOff', self.takeOff),
                 ('acquireTarget', self.acquireTarget),
+                ('findAttachmentPoint', self.findAttachmentPoint),
                 ('cleanSurface', self.cleanSurface),
+                ('sprayAdhesive', self.sprayAdhesive),
+                ('sendSensorAttachmentLocation', self.sendSensorAttachmentLocation),
                 ('land', self.land)
             ])
             
             drone2_tree = self._create_drone_sequence(droneId2, [
+                ('armDrone', self.armDrone),
+                ('goOffboard', self.offboard),
                 ('takeOff', self.takeOff),
                 ('approachTarget', self.approachTarget),
+                ('findAttachmentPoint', self.findAttachmentPoint),
+                ('exposeManipulator', self.exposeManipulator),
+                ('alignManipulator', self.alignManipulator),
+                ('applyConstantPressure', self.applyConstantPressure),
                 ('attachSensor', self.attachSensor),
                 ('land', self.land)
             ])

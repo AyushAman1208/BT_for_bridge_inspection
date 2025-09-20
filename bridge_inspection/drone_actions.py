@@ -151,33 +151,11 @@ class SwarmConductor(Node):
                 drone.current_behavior = None
                 return False
 
-        # Subsequent ticks: if still running, keep RUNNING
-        # print('##############################################################################')
-        # print('drone.go_to.is_running()',drone.go_to.is_running())
-        # print('##############################################################################')
-        # return drone.go_to.result()
+        
 
-        # # Finished: convert handler result into True/False
-        # try:
-
-        #     result = drone.go_to.result()
-        #     status = drone.go_to.result_status()
-        #     if status != GoalStatus.STATUS_SUCCEEDED:
-        #         self._node.get_logger().debug(
-        #             f'Goal failed with status code: {status}')
-        #         return False
-        #     self._node.get_logger().debug(f'Result: {result}')
-        #     return True
-    
-        # except BehaviorHandler.GoalFailed:
-        #     return False
-        # finally:
-        #     drone.current_behavior.destroy()
-        #     drone.current_behavior = None
-
-    def find_attachment_point(self,droneId):
+    def find_attachment_point(self,droneId, target_x, target_y, target_z):
         print(f"Drone {droneId} finding attachment point")
-        if not self.is_at_target(droneId, 1, -3.25, 8, 0.2):
+        if not self.is_at_target(droneId, target_x, target_y, target_z, 0.2):
             return None
         colour = [random.randint(0, 255) for _ in range(3)]
         drone = self.drones[droneId-1]
@@ -189,8 +167,8 @@ class SwarmConductor(Node):
         sleep(1)
         return True
     
-    def clean_surface(self,droneId):
-        if not self.is_at_target(droneId, 1, -3.25, 8, 0.2):
+    def clean_surface(self,droneId, target_x, target_y, target_z):
+        if not self.is_at_target(droneId, target_x, target_y, target_z, 0.2):
             return None
         print(f"Drone {droneId} cleaning surface")
         colour = [random.randint(0, 255) for _ in range(3)]
@@ -203,8 +181,8 @@ class SwarmConductor(Node):
         sleep(1)
         return True
     
-    def spray_adhesive(self,droneId):
-        if not self.is_at_target(droneId, 1, -3.25, 8, 0.2):
+    def spray_adhesive(self,droneId, target_x, target_y, target_z):
+        if not self.is_at_target(droneId, target_x, target_y, target_z, 0.2):
             return None
         print(f"Drone {droneId} spraying adhesive")
         colour = [random.randint(0, 255) for _ in range(3)]
@@ -217,8 +195,8 @@ class SwarmConductor(Node):
         sleep(1)
         return True
     
-    def expose_manipulator(self,droneId):
-        if not self.is_at_target(droneId, 1, -3.25, 8, 0.2):
+    def expose_manipulator(self,droneId, target_x, target_y, target_z):
+        if not self.is_at_target(droneId, target_x, target_y, target_z, 0.2):
             return None
         print(f"Drone {droneId} exposing manipulator")
         colour = [random.randint(0, 255) for _ in range(3)]
@@ -231,8 +209,8 @@ class SwarmConductor(Node):
         sleep(1)
         return True
     
-    def align_manipulator(self,droneId):
-        if not self.is_at_target(droneId, 1, -3.25, 8, 0.2):
+    def align_manipulator(self,droneId, target_x, target_y, target_z):
+        if not self.is_at_target(droneId, target_x, target_y, target_z, 0.2):
             return None
         print(f"Drone {droneId} aligning manipulator")
         colour = [random.randint(0, 255) for _ in range(3)]
@@ -245,8 +223,8 @@ class SwarmConductor(Node):
         sleep(1)
         return True
     
-    def apply_constant_pressure(self,droneId):
-        if not self.is_at_target(droneId, 1, -3.25, 8, 0.2):
+    def apply_constant_pressure(self,droneId, target_x, target_y, target_z):
+        if not self.is_at_target(droneId, target_x, target_y, target_z, 0.2):
             return None
         print(f"Drone {droneId} applying constant pressure")
         colour = [random.randint(0, 255) for _ in range(3)]
@@ -259,7 +237,7 @@ class SwarmConductor(Node):
         sleep(1)
         return True
     
-    def send_sensor_attachment_location(self,droneId):
+    def send_sensor_attachment_location(self,droneId, target_x, target_y, target_z):
         print(f"Drone {droneId} sending sensor attachment location")
         sleep(1)
         return True
