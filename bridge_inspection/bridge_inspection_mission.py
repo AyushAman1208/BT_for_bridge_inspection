@@ -94,19 +94,18 @@ class BridgeInspectionPhase1:
                 'z': 8
             },
             {
-                'x': 1,
+                'x': -2,
                 'y': -3.25,
                 'z': 8
             },
             {
-                'x': 1,
+                'x': -3,
                 'y': -3.25,
                 'z': 8
             }
         ]
-        self.drone1_waypoint = self.waypoints[0]
-        self.drone2_waypoint = self.waypoints[1]
-        self.drone1_waypoint_index = 0
+        self.drone1_waypoint = None
+        self.drone2_waypoint = None
         
 
 
@@ -207,14 +206,6 @@ class BridgeInspectionPhase1:
         recovery.add_children([land, disarm])
         return recovery
     
-    def updateTarget(self,droneId):
-        if(self.drone1_waypoint_index < len(self.waypoints)-1):
-            self.drone1_waypoint_index += 1
-            self.drone1_waypoint = self.waypoints[self.drone1_waypoint_index]
-            self.drone2_waypoint = self.waypoints[self.drone1_waypoint_index]
-            return None
-        else:
-            return True
 
     def land(self, droneId):
         
@@ -222,10 +213,9 @@ class BridgeInspectionPhase1:
         self._verify_drone_methods(['land', 'disarm_drone'])
 
         root = py_trees.composites.Sequence(name=f"Land_{droneId}", memory=True)
-        updateTarget = ActionBehaviour("UpdateTarget", lambda: self.updateTarget(droneId))
         land = ActionBehaviour("Land", lambda: self.droneInterface.land(droneId))
         disarm = ActionBehaviour("Disarm", lambda: self.droneInterface.disarm_drone(droneId))
-        root.add_children([updateTarget, land, disarm])
+        root.add_children([ land, disarm])
         return root
 
     def approachTarget(self,droneId):
@@ -297,45 +287,68 @@ class BridgeInspectionPhase1:
         root = py_trees.composites.Parallel(
             name="Phase1",
             policy=py_trees.common.ParallelPolicy.SuccessOnAll()
-            # memory=False
         )
 
-        try:
-            # Verify top-level expected methods once before building the trees
-            self._verify_drone_methods(['arm_drone', 'go_off_board', 'takeoff', 'is_at_altitude', 'go_to', 'find_attachment_point'])
+        # loop node: keep running until all waypoints exhausted
+        loop_drone1 = py_trees.composites.Sequence(name="LoopWaypoints_Drone1", memory=True)
+        drone1_initial_startup = py_trees.composites.Sequence(name="Drone1_InitialStartup", memory=True)
+        drone1_initial_startup.add_children([self.armDrone(droneId1), self.offboard(droneId1),self.takeOff(droneId1)])
+        loop_drone1.add_children([drone1_initial_startup])
 
-            drone1_tree = self._create_drone_sequence(droneId1, [
-                ('armDrone', self.armDrone),
-                ('goOffboard', self.offboard),
-                ('takeOff', self.takeOff),
+
+        loop_drone2 = py_trees.composites.Sequence(name="LoopWaypoints_Drone2", memory=True)
+        drone2_initial_startup = py_trees.composites.Sequence(name="Drone2_InitialStartup", memory=True)
+        drone2_initial_startup.add_children([self.armDrone(droneId2), self.offboard(droneId2),self.takeOff(droneId2)])
+        loop_drone2.add_children([drone2_initial_startup])
+
+        for i in range(len(self.waypoints)):
+            # update current waypoint index
+            set_wp1 = ActionBehaviour(
+                f"SetWaypoint_{i}_Drone1",
+                lambda idx=i: self._set_waypoint(idx)  # updates drone1_waypoint/drone2_waypoint
+            )
+            set_wp2 = ActionBehaviour(
+                f"SetWaypoint_{i}_Drone2",
+                lambda idx=i: self._set_waypoint(idx)  # updates drone1_waypoint/drone2_waypoint
+            )
+
+            # build one mission for this waypoint
+            mission_drone1 = self._create_drone_sequence(droneId1, [
                 ('acquireTarget', self.acquireTarget),
                 ('findAttachmentPoint', self.findAttachmentPoint),
                 ('cleanSurface', self.cleanSurface),
                 ('sprayAdhesive', self.sprayAdhesive),
                 ('sendSensorAttachmentLocation', self.sendSensorAttachmentLocation),
-                ('land', self.land)
             ])
-            
-            drone2_tree = self._create_drone_sequence(droneId2, [
-                ('armDrone', self.armDrone),
-                ('goOffboard', self.offboard),
-                ('takeOff', self.takeOff),
+
+            mission_drone2 = self._create_drone_sequence(droneId2, [
                 ('approachTarget', self.approachTarget),
                 ('findAttachmentPoint', self.findAttachmentPoint),
                 ('exposeManipulator', self.exposeManipulator),
                 ('alignManipulator', self.alignManipulator),
                 ('applyConstantPressure', self.applyConstantPressure),
                 ('attachSensor', self.attachSensor),
-                ('land', self.land)
             ])
-            
-            root.add_children([drone1_tree, drone2_tree])
-        except AttributeError as e:
-            logging.error(f"Error creating behavior tree: {str(e)}")
-            # Create a failure node if methods are missing
-            root = py_trees.behaviours.Failure(name="TreeCreationFailed")
 
+            loop_drone1.add_children([set_wp1, mission_drone1])
+            loop_drone2.add_children([set_wp2, mission_drone2])
+
+        # finally land after all waypoints
+        loop_drone1.add_child(self.land(droneId1))
+        loop_drone2.add_child(self.land(droneId2))
+
+        root.add_children([loop_drone1, loop_drone2])
         return root
+
+    def _set_waypoint(self, idx):
+        """Update current waypoint index and active targets"""
+        self.drone1_waypoint_index = idx
+        self.drone1_waypoint = self.waypoints[idx]
+        self.drone2_waypoint = self.waypoints[idx]
+        logging.info(f"Waypoint set to {self.waypoints[idx]}")
+        print(f"Waypoint set to {self.waypoints[idx]}")
+        return True
+
 
     def _create_drone_sequence(self, droneId, behaviors):
         """Helper to create a sequence with recovery for a drone"""
