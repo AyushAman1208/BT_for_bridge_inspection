@@ -16,19 +16,6 @@ from py_trees import blackboard
 
 py_trees.logging.level = py_trees.logging.Level.DEBUG
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
-
-class BatteryMonitor(py_trees.behaviour.Behaviour):
-    def __init__(self, droneInterface, droneId, threshold=20.0):
-        super().__init__(f"BatteryMonitor_{droneId}")
-        self.droneInterface = droneInterface
-        self.droneId = droneId
-        self.threshold = threshold
-    def update(self):
-        battery_level = self.droneInterface.get_battery_level(self.droneId)
-        if battery_level < self.threshold:
-            logging.warning(f"Low battery on drone {self.droneId}: {battery_level}%")
-            return py_trees.common.Status.FAILURE
-        return py_trees.common.Status.SUCCESS
     
 class ActionBehaviour(py_trees.behaviour.Behaviour):
     def __init__(self, name, action_fn=None, max_retries=25, timeout=50.0):
@@ -280,86 +267,130 @@ class BridgeInspectionPhase1:
         root.add_children([attachSensor])
         return root
 
-    def createPhase1BehaviorTree(self):
+    def createBehaviorTree(self):
+
         droneId1 = 1
         droneId2 = 2
 
-        root = py_trees.composites.Parallel(
-            name="Phase1",
+        def with_recovery(sequence_node, drone_id):
+            """
+            Wrap a main sequence with a selector that falls back to a recovery tree on failure.
+            """
+            selector = py_trees.composites.Selector(name=f"{sequence_node.name}_with_recovery", memory=True)
+            selector.add_children([sequence_node, self.createRecoveryTree(drone_id)])
+            return selector
+
+        # Root sequence for the whole mission
+        root = py_trees.composites.Sequence(name="BridgeInspectionMission", memory=True)
+
+        # For each waypoint, build the phase sequence
+        for idx, waypoint in enumerate(self.waypoints):
+            # update the class-level waypoint references so action lambdas pick correct coords
+            self.drone1_waypoint = waypoint
+            self.drone2_waypoint = waypoint
+
+            waypoint_name = f"Wpt_{idx+1}_{waypoint['x']}_{waypoint['y']}_{waypoint['z']}"
+            waypoint_seq = py_trees.composites.Sequence(name=waypoint_name, memory=True)
+
+            # --- Preflight: Arm, Offboard, Takeoff for both drones in parallel ---
+            preflight_parallel = py_trees.composites.Parallel(
+                name=f"Preflight_Both_{idx+1}",
+                policy=py_trees.common.ParallelPolicy.SuccessOnAll()
+            )
+            preflight_parallel.add_children([
+                py_trees.composites.Sequence(name=f"UAV1_Preflight_{idx+1}", memory=True).add_children([]) or self.armDrone(droneId1),
+                self.offboard(droneId1),
+                self.takeOff(droneId1),
+                self.armDrone(droneId2),
+                self.offboard(droneId2),
+                self.takeOff(droneId2)
+            ])
+
+            # Note: above we appended some nodes redundantly for readability; ensure a clean combined preflight
+            # Build a compact preflight sequence for UAV1 and UAV2 then run them in parallel
+            uav1_pre = py_trees.composites.Sequence(name=f"UAV1_PreflightSeq_{idx+1}", memory=True)
+            uav1_pre.add_children([self.armDrone(droneId1), self.offboard(droneId1), self.takeOff(droneId1)])
+            uav2_pre = py_trees.composites.Sequence(name=f"UAV2_PreflightSeq_{idx+1}", memory=True)
+            uav2_pre.add_children([self.armDrone(droneId2), self.offboard(droneId2), self.takeOff(droneId2)])
+
+            preflight_parallel = py_trees.composites.Parallel(
+                name=f"Preflight_Both_{idx+1}",
+                policy=py_trees.common.ParallelPolicy.SuccessOnAll()
+            )
+            preflight_parallel.add_children([uav1_pre, uav2_pre])
+
+            # --- Phase 1: Take-off and Target Acquisition ---
+            # UAV-2 identifies the target (vision), UAV-1 positions near the zone (go_to) and waits
+            phase1_seq = py_trees.composites.Sequence(name=f"Phase1_Acquire_{idx+1}", memory=True)
+
+            # UAV1 position near target (acquireTarget uses drone1_waypoint)
+            uav1_position = self.acquireTarget(droneId1)
+            # UAV2 uses vision to find attachment (uses drone2_waypoint)
+            uav2_find = self.findAttachmentPoint(droneId2)
+
+            # Run the two in parallel but require both to succeed before proceeding
+            acquire_parallel = py_trees.composites.Parallel(
+                name=f"Acquire_Parallel_{idx+1}",
+                policy=py_trees.common.ParallelPolicy.SuccessOnAll()
+            )
+            acquire_parallel.add_children([uav1_position, uav2_find])
+
+            phase1_seq.add_children([acquire_parallel])
+
+            # --- Phase 2: Adhesive Spraying (UAV-1) ---
+            phase2_seq = py_trees.composites.Sequence(name=f"Phase2_Adhesive_{idx+1}", memory=True)
+            # UAV-1 approaches the surface, cleans, sprays, then sends coordinates to UAV-2
+            # (If approach is needed for UAV1, we already used acquireTarget to reach waypoint)
+            phase2_seq.add_children([
+                self.cleanSurface(droneId1),
+                self.sprayAdhesive(droneId1),
+                self.sendSensorAttachmentLocation(droneId1)
+            ])
+
+            # --- Phase 3: Sensor Deployment (UAV-2) ---
+            phase3_seq = py_trees.composites.Sequence(name=f"Phase3_Sensor_{idx+1}", memory=True)
+            # UAV2 navigates to the marked location, ensures manipulator alignment and applies pressure then attach
+            phase3_seq.add_children([
+                self.approachTarget(droneId2),
+                self.exposeManipulator(droneId2),
+                self.alignManipulator(droneId2),
+                self.applyConstantPressure(droneId2),
+                self.attachSensor(droneId2)
+            ])
+
+            # Wrap phases with recovery selectors so a failure triggers safe recovery for that drone
+            phase1_with_recovery = with_recovery(phase1_seq, droneId2)  # primarily UAV2 may need recovery if vision fails
+            phase2_with_recovery = with_recovery(phase2_seq, droneId1)
+            phase3_with_recovery = with_recovery(phase3_seq, droneId2)
+
+            # Add everything to the waypoint sequence in logical order
+            waypoint_seq.add_children([
+                preflight_parallel,
+                phase1_with_recovery,
+                phase2_with_recovery,
+                phase3_with_recovery
+            ])
+
+            # Append waypoint sequence to root
+            root.add_children([waypoint_seq])
+
+        # After all waypoints: land both UAVs in parallel and disarm
+        postflight_parallel = py_trees.composites.Parallel(
+            name="Postflight_Land_Both",
             policy=py_trees.common.ParallelPolicy.SuccessOnAll()
         )
+        postflight_parallel.add_children([self.land(droneId1), self.land(droneId2)])
+        root.add_children([postflight_parallel])
 
-        # loop node: keep running until all waypoints exhausted
-        loop_drone1 = py_trees.composites.Sequence(name="LoopWaypoints_Drone1", memory=True)
-        drone1_initial_startup = py_trees.composites.Sequence(name="Drone1_InitialStartup", memory=True)
-        drone1_initial_startup.add_children([self.armDrone(droneId1), self.offboard(droneId1),self.takeOff(droneId1)])
-        loop_drone1.add_children([drone1_initial_startup])
-
-
-        loop_drone2 = py_trees.composites.Sequence(name="LoopWaypoints_Drone2", memory=True)
-        drone2_initial_startup = py_trees.composites.Sequence(name="Drone2_InitialStartup", memory=True)
-        drone2_initial_startup.add_children([self.armDrone(droneId2), self.offboard(droneId2),self.takeOff(droneId2)])
-        loop_drone2.add_children([drone2_initial_startup])
-
-        for i in range(len(self.waypoints)):
-            # update current waypoint index
-            set_wp1 = ActionBehaviour(
-                f"SetWaypoint_{i}_Drone1",
-                lambda idx=i: self._set_waypoint(idx)  # updates drone1_waypoint/drone2_waypoint
-            )
-            set_wp2 = ActionBehaviour(
-                f"SetWaypoint_{i}_Drone2",
-                lambda idx=i: self._set_waypoint(idx)  # updates drone1_waypoint/drone2_waypoint
-            )
-
-            # build one mission for this waypoint
-            mission_drone1 = self._create_drone_sequence(droneId1, [
-                ('acquireTarget', self.acquireTarget),
-                ('findAttachmentPoint', self.findAttachmentPoint),
-                ('cleanSurface', self.cleanSurface),
-                ('sprayAdhesive', self.sprayAdhesive),
-                ('sendSensorAttachmentLocation', self.sendSensorAttachmentLocation),
-            ])
-
-            mission_drone2 = self._create_drone_sequence(droneId2, [
-                ('approachTarget', self.approachTarget),
-                ('findAttachmentPoint', self.findAttachmentPoint),
-                ('exposeManipulator', self.exposeManipulator),
-                ('alignManipulator', self.alignManipulator),
-                ('applyConstantPressure', self.applyConstantPressure),
-                ('attachSensor', self.attachSensor),
-            ])
-
-            loop_drone1.add_children([set_wp1, mission_drone1])
-            loop_drone2.add_children([set_wp2, mission_drone2])
-
-        # finally land after all waypoints
-        loop_drone1.add_child(self.land(droneId1))
-        loop_drone2.add_child(self.land(droneId2))
-
-        root.add_children([loop_drone1, loop_drone2])
+        # Create and store the behaviour tree
+        self.tree = py_trees.trees.BehaviourTree(root)
         return root
 
-    def _set_waypoint(self, idx):
-        """Update current waypoint index and active targets"""
-        self.drone1_waypoint_index = idx
-        self.drone1_waypoint = self.waypoints[idx]
-        self.drone2_waypoint = self.waypoints[idx]
-        logging.info(f"Waypoint set to {self.waypoints[idx]}")
-        print(f"Waypoint set to {self.waypoints[idx]}")
-        return True
 
 
-    def _create_drone_sequence(self, droneId, behaviors):
-        """Helper to create a sequence with recovery for a drone"""
-        selector = py_trees.composites.Selector(name=f"Drone{droneId}_WithRecovery", memory=True)
-        sequence = py_trees.composites.Sequence(name=f"Drone{droneId}_Main", memory=True)
-        
-        for name, behavior_fn in behaviors:
-            sequence.add_child(behavior_fn(droneId))
-        
-        selector.add_children([sequence, self.createRecoveryTree(droneId)])
-        return selector
+    
+
+
     def tick(self):
         self.tree.tick_tock(
             period_ms=1000,
@@ -408,7 +439,7 @@ def main():
     
     try:
         print("\n--- Starting Behavior Tree ---\n")
-        tree = py_trees.trees.BehaviourTree(root=phase1.createPhase1BehaviorTree())
+        tree = py_trees.trees.BehaviourTree(root=phase1.createBehaviorTree())
         tree.setup(timeout=150)
         dot_graph = py_trees.display.render_dot_tree(tree.root)
         print(dot_graph)

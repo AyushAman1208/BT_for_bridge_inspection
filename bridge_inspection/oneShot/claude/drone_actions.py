@@ -1,0 +1,337 @@
+from typing import List, Optional
+from math import radians, cos, sin
+from as2_msgs.msg import YawMode
+from as2_msgs.msg import BehaviorStatus
+from as2_python_api.drone_interface import DroneInterface
+from as2_python_api.behavior_actions.behavior_handler import BehaviorHandler
+from time import sleep
+from rclpy.node import Node
+from action_msgs.msg import GoalStatus
+import random
+
+from std_msgs.msg import ColorRGBA
+
+from geometry_msgs.msg import PoseStamped
+from as2_python_api.behavior_actions.behavior_handler import BehaviorHandler #,GoalRejected, GoalFailed
+from as2_msgs.msg import YawMode
+class Dancer(DroneInterface):
+    def __init__(self, namespace: str, path: list, verbose: bool = False,
+                 use_sim_time: bool = False):
+        super().__init__(namespace, verbose=verbose, use_sim_time=use_sim_time)
+
+        self.__path = path
+        self.__current = 0
+        self.__speed = 0.5
+        self.__yaw_mode = YawMode.PATH_FACING
+        self.__yaw_angle = None
+        self.__frame_id = "earth"
+
+        self.current_behavior: Optional[BehaviorHandler] = None
+        self.current_altitude = 0.0   # store latest altitude
+        self.led_pub = self.create_publisher(ColorRGBA, f"/{namespace}/leds/control", 10)
+        # Subscribe to pose updates
+        self.create_subscription(
+            PoseStamped,
+            f"{namespace}/self_localization/pose",
+            self.pose_callback,
+            10
+        )
+
+    def pose_callback(self, msg: PoseStamped):
+        """Update altitude from pose"""
+        self.current_altitude = msg.pose.position.z
+
+
+    def reset(self) -> None:
+        """Set current waypoint in path to start point"""
+        self.__current = 0
+
+    def do_behavior(self, beh, *args):
+        print('***********************************************************************')
+        print('inside do_behavior')
+        print('behaviour: ',beh)
+        print('args: ',args)
+        method = getattr(self, beh)              # bound method (e.g., self.go_to)
+        print('method: ',method)
+        handler = method(*args)       
+        print('handler: ',handler)           # BehaviorHandler
+        self.current_behavior = method
+        print('self.current_behavior: ',self.current_behavior)
+        print('End of do_behavior')
+        print('***********************************************************************')
+        return handler
+
+
+    def go_to_next(self,droneId, x, y, z, speed, yaw_mode, yaw_angle, frame_id) -> None:
+        """Got to next position in path"""
+        self.do_behavior("go_to", x, y, z, speed, yaw_mode, yaw_angle, 'earth', False)
+        self.__current += 1
+
+    def goal_reached(self) -> bool:
+        """Check if current behavior has finished"""
+        if not self.current_behavior:
+            return False
+
+        if self.current_behavior.status == BehaviorStatus.IDLE:
+            return True
+        return False
+    
+
+
+class SwarmConductor(Node):
+    """Swarm Conductor"""
+
+    def __init__(self, drones_ns: List[str], verbose: bool = False,
+                 use_sim_time: bool = False):
+        super().__init__('swarm_conductor')
+        self.drones: dict[int, Dancer] = {}
+        for index, name in enumerate(drones_ns):
+            path = []
+            self.drones[index] = Dancer(name, path, verbose, use_sim_time)
+
+    ##************************************
+    def arm_drone(self,droneId):
+        print(f"Drone {droneId} arming")
+        """Arm all drones in swarm"""
+        drone = self.drones[droneId-1]
+        arm_drone_status = drone.arm()
+        print('arm_drone_status',arm_drone_status)
+        print('current_behavior',drone.current_behavior)
+
+        print('Drone info')
+        print('connected: ',drone.info['connected'])
+        print('armed: ',drone.info['armed'])
+        print('offboard: ',drone.info['offboard'])
+        print('state: ',drone.info['state'])
+        print('yaw_mode: ',drone.info['yaw_mode'])
+        print('control_mode: ',drone.info['control_mode'])
+        print('reference_frame: ',drone.info['reference_frame'])
+        print('all info: ',drone.info)
+
+        return arm_drone_status
+
+    def go_off_board(self,droneId):
+        """Offboard all drones in swarm"""
+        print(f"Drone {droneId} offboarding")
+        drone = self.drones[droneId-1]
+        offboard_drone_status = drone.offboard()
+        print('offboard_drone_status',offboard_drone_status)
+        print('current_behavior',drone.current_behavior)
+        return offboard_drone_status
+    def go_to(self, droneId, x, y, z, speed, yaw_mode, yaw_angle, frame_id):
+        drone = self.drones[droneId-1]
+        if not self.is_in_offboard_mode(droneId):
+            return None
+
+        # Normalize yaw parameters: prefer enums, angle None when not FIXED
+        # yaw_mode = yaw_mode if isinstance(yaw_mode, int) else YawMode.PATH_FACING
+        # yaw_angle = None if yaw_mode != YawMode.FIXED else (yaw_angle or 0.0)
+
+
+
+        print('***********************************************************************')
+        print(f"Drone {droneId} going to {x}, {y}, {z}")
+        # self.is_at_target(droneId, x, y, z, 0.2)
+
+        # 1st call: start once, then report RUNNING (by returning None)
+        # print(drone.current_behavior.is_running())
+        if drone.current_behavior is None or not drone.current_behavior.is_running():
+            try:
+                drone.go_to(x, y, z, speed, yaw_mode, yaw_angle, frame_id, False)
+                handler = drone.do_behavior("go_to", x, y, z, speed, yaw_mode, yaw_angle, frame_id, False)
+                return handler
+                # if handler and drone.go_to.is_running(): return None  # tell ActionBehaviour: still running
+                # print('pose',drone.go_to.__get_pose())
+                # if handler:
+                #     print('pose',drone.go_to.__get_pose()) 
+                #     return True
+                
+            except BehaviorHandler.GoalRejected:
+                print(f"[WARN] Drone {droneId} go_to goal rejected")
+                drone.current_behavior = None
+                return False
+
+        
+
+    def find_attachment_point(self,droneId, target_x, target_y, target_z):
+        print(f"Drone {droneId} finding attachment point")
+        if not self.is_at_target(droneId, target_x, target_y, target_z, 0.2):
+            return None
+        colour = [random.randint(0, 255) for _ in range(3)]
+        drone = self.drones[droneId-1]
+        msg = ColorRGBA()
+        msg.r = colour[0]/255.0
+        msg.g = colour[1]/255.0
+        msg.b = colour[2]/255.0
+        drone.led_pub.publish(msg)
+        sleep(1)
+        return True
+    
+    def clean_surface(self,droneId, target_x, target_y, target_z):
+        if not self.is_at_target(droneId, target_x, target_y, target_z, 0.2):
+            return None
+        print(f"Drone {droneId} cleaning surface")
+        colour = [random.randint(0, 255) for _ in range(3)]
+        drone = self.drones[droneId-1]
+        msg = ColorRGBA()
+        msg.r = colour[0]/255.0
+        msg.g = colour[1]/255.0
+        msg.b = colour[2]/255.0
+        drone.led_pub.publish(msg)
+        sleep(1)
+        return True
+    
+    def spray_adhesive(self,droneId, target_x, target_y, target_z):
+        if not self.is_at_target(droneId, target_x, target_y, target_z, 0.2):
+            return None
+        print(f"Drone {droneId} spraying adhesive")
+        colour = [random.randint(0, 255) for _ in range(3)]
+        drone = self.drones[droneId-1]
+        msg = ColorRGBA()
+        msg.r = colour[0]/255.0
+        msg.g = colour[1]/255.0
+        msg.b = colour[2]/255.0
+        drone.led_pub.publish(msg)
+        sleep(1)
+        return True
+    
+    def expose_manipulator(self,droneId, target_x, target_y, target_z):
+        if not self.is_at_target(droneId, target_x, target_y, target_z, 0.2):
+            return None
+        print(f"Drone {droneId} exposing manipulator")
+        colour = [random.randint(0, 255) for _ in range(3)]
+        drone = self.drones[droneId-1]
+        msg = ColorRGBA()
+        msg.r = colour[0]/255.0
+        msg.g = colour[1]/255.0
+        msg.b = colour[2]/255.0
+        drone.led_pub.publish(msg)
+        sleep(1)
+        return True
+    
+    def align_manipulator(self,droneId, target_x, target_y, target_z):
+        if not self.is_at_target(droneId, target_x, target_y, target_z, 0.2):
+            return None
+        print(f"Drone {droneId} aligning manipulator")
+        colour = [random.randint(0, 255) for _ in range(3)]
+        drone = self.drones[droneId-1]
+        msg = ColorRGBA()
+        msg.r = colour[0]/255.0
+        msg.g = colour[1]/255.0
+        msg.b = colour[2]/255.0
+        drone.led_pub.publish(msg)
+        sleep(1)
+        return True
+    
+    def apply_constant_pressure(self,droneId, target_x, target_y, target_z):
+        if not self.is_at_target(droneId, target_x, target_y, target_z, 0.2):
+            return None
+        print(f"Drone {droneId} applying constant pressure")
+        colour = [random.randint(0, 255) for _ in range(3)]
+        drone = self.drones[droneId-1]
+        msg = ColorRGBA()
+        msg.r = colour[0]/255.0
+        msg.g = colour[1]/255.0
+        msg.b = colour[2]/255.0
+        drone.led_pub.publish(msg)
+        sleep(1)
+        return True
+    
+    def send_sensor_attachment_location(self,droneId, target_x, target_y, target_z):
+        print(f"Drone {droneId} sending sensor attachment location")
+        sleep(1)
+        return True
+    
+    def shutdown(self,droneId):
+        """Shutdown all drones in swarm"""
+        drone = self.drones[droneId-1]
+        return drone.shutdown()
+    
+    
+    def disarm_drone(self,droneId):
+        """Disarm all drones in swarm"""
+        if self.get_altitude(droneId) > 0.1:
+            return
+
+        drone = self.drones[droneId-1]
+        return drone.disarm()
+    def get_ready(self,droneId) -> bool:
+        """Arm and offboard for all drones in swarm"""
+        success = True
+        drone = self.drones[droneId-1]
+        return drone.arm() and drone.offboard()
+
+    def takeoff(self, droneId):
+        drone = self.drones[droneId-1]
+        print('current_behavior 1',drone.current_behavior)
+        if not self.is_armed(droneId):
+            return None
+        
+        if drone.current_behavior is None or not drone.current_behavior.is_running():
+            try:
+                handler = drone.do_behavior("takeoff", 1.0, 0.7, False)  # height, speed, ignore_collisions
+                print(handler)
+                print('current_behavior 2',drone.current_behavior)
+                print('current behaviour is running: ',drone.current_behavior.is_running())
+                return handler
+            except BehaviorHandler.GoalRejected:
+                drone.current_behavior = None
+                return False
+        if drone.current_behavior.is_running():
+            return None
+        try:
+            ok = drone.current_behavior.wait_to_result()
+            return bool(ok)
+        finally:
+            drone.current_behavior.destroy()
+            drone.current_behavior = None
+
+    def land(self, droneId):
+        drone = self.drones[droneId-1]
+        # Stop any running behavior before sending land to avoid GoalRejected
+        if drone.current_behavior and drone.current_behavior.is_running():
+            drone.current_behavior.stop()
+        if drone.current_behavior:
+            drone.current_behavior.destroy()
+            drone.current_behavior = None
+
+        try:
+            handler = drone.do_behavior("land", 0.4, False)
+            return handler
+        except BehaviorHandler.GoalRejected:
+            return False
+
+
+    def is_armed(self, droneId):
+        """Check if drone is armed (mock implementation)"""
+        drone = self.drones[droneId-1]
+        return drone.info["armed"]
+
+    def is_in_offboard_mode(self, droneId):
+        """Check if drone is in offboard mode (mock implementation)"""
+        # In real implementation, check actual mode
+        drone = self.drones[droneId-1]
+        return drone.info["offboard"]
+
+    def get_altitude(self, droneId):
+        drone = self.drones[droneId-1]
+        return drone.position[2]
+    
+    def is_at_altitude(self, droneId, target_alt, tolerance=0.2):
+        current_alt = self.get_altitude(droneId)
+        print(f"[DEBUG] Drone {droneId} current_alt: {current_alt:.2f}, target_alt: {target_alt}")
+        return abs(current_alt - target_alt) <= tolerance
+    def is_at_target(self, droneId, target_x, target_y, target_z, tolerance=0.2):
+        print('Drone position',self.get_drone_position(droneId))
+        current_x = self.get_drone_position(droneId)[0]
+        current_y = self.get_drone_position(droneId)[1]
+        current_z = self.get_drone_position(droneId)[2]
+        print(f"[DEBUG] Drone {droneId} current_x: {current_x:.2f}, target_x: {target_x:.2f}")
+        print(f"[DEBUG] Drone {droneId} current_y: {current_y:.2f}, target_y: {target_y:.2f}")
+        print(f"[DEBUG] Drone {droneId} current_z: {current_z:.2f}, target_z: {target_z:.2f}")
+        return abs(current_x - target_x) <= tolerance and abs(current_y - target_y) <= tolerance and abs(current_z - target_z) <= tolerance
+    def get_drone_position(self, droneId):
+        drone = self.drones[droneId-1]
+        position = drone.position
+        print(f"Drone {droneId} position: {position}")
+        return position

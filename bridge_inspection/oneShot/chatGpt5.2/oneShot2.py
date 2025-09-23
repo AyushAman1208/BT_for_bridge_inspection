@@ -16,19 +16,6 @@ from py_trees import blackboard
 
 py_trees.logging.level = py_trees.logging.Level.DEBUG
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
-
-class BatteryMonitor(py_trees.behaviour.Behaviour):
-    def __init__(self, droneInterface, droneId, threshold=20.0):
-        super().__init__(f"BatteryMonitor_{droneId}")
-        self.droneInterface = droneInterface
-        self.droneId = droneId
-        self.threshold = threshold
-    def update(self):
-        battery_level = self.droneInterface.get_battery_level(self.droneId)
-        if battery_level < self.threshold:
-            logging.warning(f"Low battery on drone {self.droneId}: {battery_level}%")
-            return py_trees.common.Status.FAILURE
-        return py_trees.common.Status.SUCCESS
     
 class ActionBehaviour(py_trees.behaviour.Behaviour):
     def __init__(self, name, action_fn=None, max_retries=25, timeout=50.0):
@@ -280,86 +267,85 @@ class BridgeInspectionPhase1:
         root.add_children([attachSensor])
         return root
 
-    def createPhase1BehaviorTree(self):
-        droneId1 = 1
-        droneId2 = 2
+    def createBehaviorTree(self):
 
-        root = py_trees.composites.Parallel(
-            name="Phase1",
+        droneId1 = 1  # UAV-1
+        droneId2 = 2  # UAV-2
+
+        # === Root of the mission ===
+        root = py_trees.composites.Sequence(name="BridgeInspectionMission", memory=True)
+
+        # Iterate through all waypoints
+        for idx, waypoint in enumerate(self.waypoints):
+            self.drone1_waypoint = waypoint
+            self.drone2_waypoint = waypoint
+
+            # A container for all phases at this waypoint
+            waypoint_seq = py_trees.composites.Sequence(
+                name=f"Waypoint_{idx+1}_{waypoint['x']}_{waypoint['y']}_{waypoint['z']}", 
+                memory=True
+            )
+
+            # === Phase 1: Take-off and Target Acquisition ===
+            takeoff_parallel = py_trees.composites.Sequence(
+                name=f"TakeOff_Both_{idx+1}",
+                memory=False
+            )
+            takeoff_parallel.add_children([
+                self.takeOff(droneId1),
+                self.takeOff(droneId2)
+            ])
+
+            acquire_seq = py_trees.composites.Sequence(name=f"AcquireTargetPhase_{idx+1}", memory=True)
+            acquire_seq.add_children([
+                self.acquireTarget(droneId1),      # UAV-1 moves near target zone
+                self.findAttachmentPoint(droneId2) # UAV-2 identifies attachment point
+            ])
+
+            # === Phase 2: Adhesive Spraying (UAV-1) ===
+            adhesive_seq = py_trees.composites.Sequence(name=f"AdhesivePhase_{idx+1}", memory=True)
+            adhesive_seq.add_children([
+                self.cleanSurface(droneId1),                  # clean surface
+                self.sprayAdhesive(droneId1),                 # spray adhesive
+                self.sendSensorAttachmentLocation(droneId1)   # send coordinates to UAV-2
+            ])
+
+            # === Phase 3: Sensor Deployment (UAV-2) ===
+            sensor_seq = py_trees.composites.Sequence(name=f"SensorPhase_{idx+1}", memory=True)
+            sensor_seq.add_children([
+                self.approachTarget(droneId2),     # UAV-2 navigates to location
+                self.exposeManipulator(droneId2),  # expose manipulator
+                self.alignManipulator(droneId2),   # align end-effector parallel to wall
+                self.applyConstantPressure(droneId2), # maintain pressure
+                self.attachSensor(droneId2)        # attach sensor
+            ])
+
+            # === Add all phases for this waypoint ===
+            waypoint_seq.add_children([
+                takeoff_parallel,
+                acquire_seq,
+                adhesive_seq,
+                sensor_seq
+            ])
+
+            root.add_children([waypoint_seq])
+
+        # === Final Land after all waypoints ===
+        land_parallel = py_trees.composites.Parallel(
+            name="Land_Both",
             policy=py_trees.common.ParallelPolicy.SuccessOnAll()
         )
+        land_parallel.add_children([
+            self.land(droneId1),
+            self.land(droneId2)
+        ])
+        root.add_children([land_parallel])
 
-        # loop node: keep running until all waypoints exhausted
-        loop_drone1 = py_trees.composites.Sequence(name="LoopWaypoints_Drone1", memory=True)
-        drone1_initial_startup = py_trees.composites.Sequence(name="Drone1_InitialStartup", memory=True)
-        drone1_initial_startup.add_children([self.armDrone(droneId1), self.offboard(droneId1),self.takeOff(droneId1)])
-        loop_drone1.add_children([drone1_initial_startup])
-
-
-        loop_drone2 = py_trees.composites.Sequence(name="LoopWaypoints_Drone2", memory=True)
-        drone2_initial_startup = py_trees.composites.Sequence(name="Drone2_InitialStartup", memory=True)
-        drone2_initial_startup.add_children([self.armDrone(droneId2), self.offboard(droneId2),self.takeOff(droneId2)])
-        loop_drone2.add_children([drone2_initial_startup])
-
-        for i in range(len(self.waypoints)):
-            # update current waypoint index
-            set_wp1 = ActionBehaviour(
-                f"SetWaypoint_{i}_Drone1",
-                lambda idx=i: self._set_waypoint(idx)  # updates drone1_waypoint/drone2_waypoint
-            )
-            set_wp2 = ActionBehaviour(
-                f"SetWaypoint_{i}_Drone2",
-                lambda idx=i: self._set_waypoint(idx)  # updates drone1_waypoint/drone2_waypoint
-            )
-
-            # build one mission for this waypoint
-            mission_drone1 = self._create_drone_sequence(droneId1, [
-                ('acquireTarget', self.acquireTarget),
-                ('findAttachmentPoint', self.findAttachmentPoint),
-                ('cleanSurface', self.cleanSurface),
-                ('sprayAdhesive', self.sprayAdhesive),
-                ('sendSensorAttachmentLocation', self.sendSensorAttachmentLocation),
-            ])
-
-            mission_drone2 = self._create_drone_sequence(droneId2, [
-                ('approachTarget', self.approachTarget),
-                ('findAttachmentPoint', self.findAttachmentPoint),
-                ('exposeManipulator', self.exposeManipulator),
-                ('alignManipulator', self.alignManipulator),
-                ('applyConstantPressure', self.applyConstantPressure),
-                ('attachSensor', self.attachSensor),
-            ])
-
-            loop_drone1.add_children([set_wp1, mission_drone1])
-            loop_drone2.add_children([set_wp2, mission_drone2])
-
-        # finally land after all waypoints
-        loop_drone1.add_child(self.land(droneId1))
-        loop_drone2.add_child(self.land(droneId2))
-
-        root.add_children([loop_drone1, loop_drone2])
         return root
 
-    def _set_waypoint(self, idx):
-        """Update current waypoint index and active targets"""
-        self.drone1_waypoint_index = idx
-        self.drone1_waypoint = self.waypoints[idx]
-        self.drone2_waypoint = self.waypoints[idx]
-        logging.info(f"Waypoint set to {self.waypoints[idx]}")
-        print(f"Waypoint set to {self.waypoints[idx]}")
-        return True
+    
 
 
-    def _create_drone_sequence(self, droneId, behaviors):
-        """Helper to create a sequence with recovery for a drone"""
-        selector = py_trees.composites.Selector(name=f"Drone{droneId}_WithRecovery", memory=True)
-        sequence = py_trees.composites.Sequence(name=f"Drone{droneId}_Main", memory=True)
-        
-        for name, behavior_fn in behaviors:
-            sequence.add_child(behavior_fn(droneId))
-        
-        selector.add_children([sequence, self.createRecoveryTree(droneId)])
-        return selector
     def tick(self):
         self.tree.tick_tock(
             period_ms=1000,
@@ -408,7 +394,7 @@ def main():
     
     try:
         print("\n--- Starting Behavior Tree ---\n")
-        tree = py_trees.trees.BehaviourTree(root=phase1.createPhase1BehaviorTree())
+        tree = py_trees.trees.BehaviourTree(root=phase1.createBehaviorTree())
         tree.setup(timeout=150)
         dot_graph = py_trees.display.render_dot_tree(tree.root)
         print(dot_graph)
